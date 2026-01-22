@@ -1,121 +1,159 @@
-const fs = require('fs');
+const admin = require('firebase-admin');
 const path = require('path');
 
-const DATA_FILE = path.join(__dirname, 'data', 'limits.json');
+// Initialize Firebase
+try {
+    let serviceAccount;
+    // Check if key exists locally (Development)
+    if (require('fs').existsSync('./serviceAccountKey.json')) {
+        serviceAccount = require('./serviceAccountKey.json');
+    } else if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+        // Production (Render Env Var)
+        // Check if it's base64 or raw JSON
+        const rawKey = process.env.FIREBASE_SERVICE_ACCOUNT;
+        if (rawKey.trim().startsWith('{')) {
+            serviceAccount = JSON.parse(rawKey);
+        } else {
+            // Assume Base64
+            const buffer = Buffer.from(rawKey, 'base64');
+            serviceAccount = JSON.parse(buffer.toString('utf8'));
+        }
+    }
+
+    if (serviceAccount) {
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount)
+        });
+        console.log("Firebase Admin Initialized Successfully");
+    } else {
+        console.error("Firebase Service Account Key NOT FOUND. Limits will not work permanently.");
+    }
+} catch (e) {
+    console.error("Firebase Init Error:", e);
+}
+
+const db = admin.firestore();
 const DAILY_LIMIT = 5;
-
-// Initial data structure
-let limitsData = {};
-
-// Load data on startup
-if (fs.existsSync(DATA_FILE)) {
-    try {
-        limitsData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    } catch (e) {
-        console.error("Error reading limits file:", e);
-        limitsData = {};
-    }
-}
-
-function saveLimits() {
-    try {
-        fs.writeFileSync(DATA_FILE, JSON.stringify(limitsData, null, 2));
-    } catch (e) {
-        console.error("Error saving limits:", e);
-    }
-}
 
 function getTodayStr() {
     return new Date().toISOString().split('T')[0];
 }
 
-function getLimitStatus(deviceId) {
+async function getLimitStatus(deviceId) {
     if (!deviceId) return { allowed: false, remaining: 0, error: "No Device ID" };
 
-    const today = getTodayStr();
-    let userData = limitsData[deviceId];
+    try {
+        const userRef = db.collection('users').doc(deviceId);
+        const doc = await userRef.get();
+        const today = getTodayStr();
 
-    // Initialize or reset if new day
-    if (!userData || userData.date !== today) {
-        userData = {
-            date: today,
-            count: DAILY_LIMIT
-        };
-        limitsData[deviceId] = userData;
-        saveLimits();
-    }
+        let userData = doc.exists ? doc.data() : null;
 
-    // Check Premium via Expiry Date
-    if (userData.subscriptionExpiry) {
-        const expiryDate = new Date(userData.subscriptionExpiry);
-        const now = new Date();
-
-        if (expiryDate > now) {
-            return {
-                allowed: true,
-                remaining: 9999,
-                isPremium: true,
-                expiryDate: userData.subscriptionExpiry
+        // Initialize or reset if new day
+        if (!userData || userData.date !== today) {
+            userData = {
+                date: today,
+                count: DAILY_LIMIT,
+                ...userData // Keep existing fields like subscriptionExpiry
             };
-        } else {
-            // Expired
-            userData.isPremium = false; // Cleanup old flag if present
-            // Don't remove expiry date record, just treat as standard
+            if (userData.subscriptionExpiry) delete userData.count; // Optimization: Don't need count for premium, but kept for logic simplicity
+
+            // Only update date/count, preserve premium info
+            await userRef.set({ date: today, count: DAILY_LIMIT }, { merge: true });
         }
-    }
 
-    return {
-        allowed: userData.count > 0,
-        remaining: userData.count,
-        isPremium: false
-    };
+        // Check Premium via Expiry Date
+        if (userData.subscriptionExpiry) {
+            const expiryDate = new Date(userData.subscriptionExpiry);
+            const now = new Date();
+
+            if (expiryDate > now) {
+                return {
+                    allowed: true,
+                    remaining: 9999,
+                    isPremium: true,
+                    expiryDate: userData.subscriptionExpiry
+                };
+            }
+        }
+
+        return {
+            allowed: userData.count > 0,
+            remaining: userData.count,
+            isPremium: false
+        };
+    } catch (e) {
+        console.error("Error getting limit status:", e);
+        // Fallback to allow if DB fails? No, fail safe.
+        return { allowed: false, remaining: 0, error: "Database Error" };
+    }
 }
 
-function decrementLimit(deviceId) {
-    const status = getLimitStatus(deviceId);
-    // If premium (expiry > now), we don't decrement count? Or we do but it doesn't matter?
-    // Usually premium is unlimited. So if allowed=true and remaing=9999, we skip decrement.
+async function decrementLimit(deviceId) {
+    try {
+        const userRef = db.collection('users').doc(deviceId);
+        // Transaction to ensure atomic update
+        await db.runTransaction(async (t) => {
+            const doc = await t.get(userRef);
+            if (!doc.exists) return;
+            const data = doc.data();
 
-    if (status.isPremium) return true;
+            // Validate again inside transaction
+            if (data.subscriptionExpiry && new Date(data.subscriptionExpiry) > new Date()) {
+                return; // Premium, don't decrement
+            }
 
-    if (status.allowed) {
-        limitsData[deviceId].count--;
-        saveLimits();
+            if (data.count > 0) {
+                t.update(userRef, { count: data.count - 1 });
+            }
+        });
         return true;
+    } catch (e) {
+        console.error("Error decrementing:", e);
+        return false;
     }
-    return false;
 }
 
-function incrementLimit(deviceId) {
-    const status = getLimitStatus(deviceId);
-    if (limitsData[deviceId]) {
-        limitsData[deviceId].count++;
-        saveLimits();
-        return { success: true, remaining: limitsData[deviceId].count };
+async function incrementLimit(deviceId) {
+    try {
+        const userRef = db.collection('users').doc(deviceId);
+        await userRef.update({ count: admin.firestore.FieldValue.increment(1) });
+        return { success: true };
+    } catch (e) {
+        console.error("Error incrementing:", e);
+        return { success: false };
     }
-    return { success: false, error: "Device not found" };
 }
 
-function upgradeUser(deviceId, days = 30) {
-    const status = getLimitStatus(deviceId); // Ensure entry exists
-    if (limitsData[deviceId]) {
+async function upgradeUser(deviceId, days = 30) {
+    try {
+        const userRef = db.collection('users').doc(deviceId);
+        const doc = await userRef.get();
+
         const now = new Date();
-        let currentExpiry = limitsData[deviceId].subscriptionExpiry ? new Date(limitsData[deviceId].subscriptionExpiry) : now;
+        let currentExpiry = now;
 
-        // If expired, start from now. If active, extend from current expiry.
-        if (currentExpiry < now) {
-            currentExpiry = now;
+        if (doc.exists) {
+            const data = doc.data();
+            if (data.subscriptionExpiry) {
+                const exp = new Date(data.subscriptionExpiry);
+                if (exp > now) currentExpiry = exp;
+            }
         }
 
         // Add days
         currentExpiry.setDate(currentExpiry.getDate() + days);
 
-        limitsData[deviceId].subscriptionExpiry = currentExpiry.toISOString();
-        limitsData[deviceId].isPremium = true; // Legacy flag support
-        saveLimits();
+        await userRef.set({
+            subscriptionExpiry: currentExpiry.toISOString(),
+            isPremium: true
+        }, { merge: true });
+
         return true;
+    } catch (e) {
+        console.error("Error upgrading user:", e);
+        return false;
     }
-    return false;
 }
 
 module.exports = {
