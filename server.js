@@ -119,7 +119,7 @@ app.post('/api/generate', upload.single('image'), async (req, res) => {
                 }
                 break;
             case 'code':
-                systemInstruction = "You are a senior software engineer. specific, clean, and commented code for the requested task. Return ONLY the code logic wrapped in markdown blocks.";
+                systemInstruction = "You are a senior software engineer. Generate specific, clean, and commented code for the requested task. Accept input in ANY language (English, Hindi, Hinglish, etc.) and respond in English. Return ONLY the code logic wrapped in markdown blocks.";
                 userPrompt = `Language: ${inputs.language}\nTask: ${inputs.task}`;
                 break;
             case 'error_solver':
