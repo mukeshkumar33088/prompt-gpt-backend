@@ -194,7 +194,7 @@ Intent Guidelines:
         // Decrement Limit after success
         // Only decrement if we actually got text
         if (text && text.length > 0) {
-            limitService.decrementLimit(deviceId);
+            await limitService.decrementLimit(deviceId);
         }
 
         let output = {};
@@ -213,10 +213,11 @@ Intent Guidelines:
             output = { prompt: text };
         }
 
+        const updatedStatus = await limitService.getLimitStatus(deviceId);
         res.json({
             success: true,
             ...output,
-            remaining: limitService.getLimitStatus(deviceId).remaining
+            remaining: updatedStatus.remaining
         });
 
     } catch (error) {
