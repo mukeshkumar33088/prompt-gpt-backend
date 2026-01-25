@@ -53,14 +53,23 @@ app.post('/api/create-order', async (req, res) => {
 });
 
 app.post('/api/verify-payment', (req, res) => {
-    const { orderId, paymentId, signature, deviceId, duration } = req.body;
+    const { orderId, paymentId, signature, deviceId, duration, email, phone, amount } = req.body;
     const isValid = paymentService.verifyPayment(orderId, paymentId, signature);
 
     if (isValid) {
         // Use provided duration or default to 30
         const days = duration || 30;
 
-        limitService.upgradeUser(deviceId, days);
+        // Pass payment details to upgradeUser
+        const paymentDetails = {
+            orderId,
+            paymentId,
+            email,
+            phone,
+            amount
+        };
+
+        limitService.upgradeUser(deviceId, days, paymentDetails);
         res.json({ success: true, message: `Premium Activated for ${days} Days` });
     } else {
         res.status(400).json({ success: false, error: "Invalid Signature" });

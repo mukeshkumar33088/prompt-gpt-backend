@@ -125,7 +125,7 @@ async function incrementLimit(deviceId) {
     }
 }
 
-async function upgradeUser(deviceId, days = 30) {
+async function upgradeUser(deviceId, days = 30, paymentDetails = {}) {
     try {
         const userRef = db.collection('users').doc(deviceId);
         const doc = await userRef.get();
@@ -144,11 +144,28 @@ async function upgradeUser(deviceId, days = 30) {
         // Add days
         currentExpiry.setDate(currentExpiry.getDate() + days);
 
+        // Update users collection
         await userRef.set({
             subscriptionExpiry: currentExpiry.toISOString(),
             isPremium: true
         }, { merge: true });
 
+        // Also add to premium_users collection for tracking
+        const premiumUserRef = db.collection('premium_users').doc(deviceId);
+        await premiumUserRef.set({
+            deviceId: deviceId,
+            subscriptionExpiry: currentExpiry.toISOString(),
+            isPremium: true,
+            upgradedAt: now.toISOString(),
+            planDuration: days,
+            email: paymentDetails.email || null,
+            phone: paymentDetails.phone || null,
+            orderId: paymentDetails.orderId || null,
+            paymentId: paymentDetails.paymentId || null,
+            amount: paymentDetails.amount || null,
+        }, { merge: true });
+
+        console.log(`User ${deviceId} upgraded to Premium. Expiry: ${currentExpiry.toISOString()}`);
         return true;
     } catch (e) {
         console.error("Error upgrading user:", e);
