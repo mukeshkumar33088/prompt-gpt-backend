@@ -4,6 +4,7 @@ const cors = require('cors');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const limitService = require('./limitService');
 const paymentService = require('./paymentService');
+const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 
