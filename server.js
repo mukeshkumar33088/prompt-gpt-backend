@@ -23,9 +23,9 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // Routes
 
 // 1. Check Limit Endpoint
-app.get('/api/limit/:deviceId', (req, res) => {
+app.get('/api/limit/:deviceId', async (req, res) => {
     const { deviceId } = req.params;
-    const status = limitService.getLimitStatus(deviceId);
+    const status = await limitService.getLimitStatus(deviceId);
     res.json(status);
 });
 
