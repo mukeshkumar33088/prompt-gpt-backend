@@ -108,8 +108,9 @@ app.post('/api/generate', upload.single('image'), async (req, res) => {
 
         switch (category.toLowerCase()) {
             case 'email':
-                systemInstruction = "You are an expert email copywriter. Generate a professional, concise, and effective email based on the user's details. Return ONLY the email subject and body.";
-                userPrompt = `Recipient: ${inputs.recipient}\nTopic: ${inputs.topic}\nTone: ${inputs.tone || 'Professional'}\nContext: ${inputs.details || 'None'}`;
+                const emailTone = inputs.tone || 'Professional';
+                systemInstruction = `You are an expert email copywriter. Generate a ${emailTone.toLowerCase()} email based on the user's details. The tone MUST be ${emailTone.toLowerCase()} - adjust language, formality, and urgency accordingly. Return ONLY the email subject and body.`;
+                userPrompt = `Recipient: ${inputs.recipient}\nTopic: ${inputs.topic}\nTone: ${emailTone}\nContext: ${inputs.details || 'None'}`;
                 break;
             case 'social':
                 systemInstruction = "You are a social media manager. Create an engaging post for the specified platform. Include hashtags and emojis. Return ONLY the post text.";
