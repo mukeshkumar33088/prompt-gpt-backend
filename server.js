@@ -4,10 +4,23 @@ const cors = require('cors');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const limitService = require('./limitService');
 const paymentService = require('./paymentService');
-const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
 
-// Configure Multer for memory storage
-const storage = multer.memoryStorage();
+// Configure Multer for Disk Storage (Prevents OOM Crashes on Render)
+const uploadDir = '/tmp/uploads';
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, uploadDir)
+    },
+    filename: function (req, file, cb) {
+        cb(null, Date.now() + '-' + file.originalname)
+    }
+});
 const upload = multer({ storage: storage });
 
 const app = express();
@@ -183,9 +196,13 @@ Intent Guidelines:
 
         // Add Image if present
         if (req.file) {
+            // Read file from disk (since we use diskStorage now)
+            const imageBuffer = fs.readFileSync(req.file.path);
+            const base64Image = imageBuffer.toString('base64');
+
             const imagePart = {
                 inlineData: {
-                    data: req.file.buffer.toString('base64'),
+                    data: base64Image,
                     mimeType: req.file.mimetype,
                 },
             };
@@ -193,35 +210,62 @@ Intent Guidelines:
         }
 
         const result = await chat.sendMessage(parts);
-        const responseCallback = await result.response;
-        const text = responseCallback.text();
+        const response = await result.response;
+        let text = response.text();
+
+        // Increment usage count (only if not ad rewarded)
+        if (!adRewardToken) {
+            await limitService.incrementLimit(deviceId);
+        }
+
+        // Clean up: Delete temp file
+        if (req.file) {
+            fs.unlink(req.file.path, (err) => {
+                if (err) console.error("Error deleting temp file:", err);
+            });
+        }
+
+        // --- 3. Return Response (Clean JSON) ---
+        // If the category asked for JSON, try to parse it (Gemini sometimes adds markdown blocks)
+        if (['smart_analyze'].includes(category.toLowerCase())) {
+            try {
+                // Remove Markdown blocks (```json ... ```)
+                const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```\n([\s\S]*?)\n```/);
+                if (jsonMatch) {
+                    text = jsonMatch[1];
+                }
+                const parsed = JSON.parse(text);
+
+                // Fetch updated limit
+                const newLimit = await limitService.getLimitStatus(deviceId);
+
+                return res.json({
+                    success: true,
+                    prompt: parsed.prompt,
+                    analysis: parsed.analysis,
+                    tip: parsed.tip,
+                    remaining: newLimit.remaining
+                });
+            } catch (e) {
+                console.error("JSON Parse Error from Gemini:", e);
+                // Fallback -> return raw text as prompt
+                const newLimit = await limitService.getLimitStatus(deviceId);
+                return res.json({
+                    success: true,
+                    prompt: text,
+                    analysis: "Auto-Analysis Failed",
+                    tip: "Check prompt above",
+                    remaining: newLimit.remaining
+                });
+            }
+        }
 
         console.log(`[Generate] Success. Length: ${text.length}`);
         if (!text) {
             console.error("[Generate] Empty response text!");
         }
 
-        // Decrement Limit after success
-        // Only decrement if we actually got text
-        if (text && text.length > 0) {
-            await limitService.decrementLimit(deviceId);
-        }
-
-        let output = {};
-
-        // Try to parse JSON for smart_analyze, otherwise use raw text
-        if (category === 'smart_analyze') {
-            try {
-                // Remove Markdown code blocks if present
-                const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-                output = JSON.parse(cleanText);
-            } catch (e) {
-                console.error("Failed to parse Gemini JSON:", e);
-                output = { prompt: text, analysis: "Analysis failed", tip: "Try again" };
-            }
-        } else {
-            output = { prompt: text };
-        }
+        let output = { prompt: text };
 
         const updatedStatus = await limitService.getLimitStatus(deviceId);
         res.json({
