@@ -87,13 +87,13 @@ app.post('/api/generate', upload.single('image'), async (req, res) => {
     }
 
     // Check Limit (Bypass if adRewardToken is present)
-    const limitStatus = limitService.getLimitStatus(deviceId);
+    const limitStatus = await limitService.getLimitStatus(deviceId);
 
     // If adRewardToken is true, we assume the user watched an ad.
     // Ideally we should verify a real token, but for now we trust the client flag.
     if (adRewardToken) {
         console.log(`[Generate] Bypassing limit for device ${deviceId} due to Ad Reward.`);
-        limitService.incrementLimit(deviceId); // Restore balance so next check passes normally too
+        await limitService.incrementLimit(deviceId); // Restore balance so next check passes normally too
     } else if (!limitStatus.allowed) {
         return res.status(403).json({
             error: "Daily limit reached",
