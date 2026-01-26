@@ -60,6 +60,11 @@ async function getLimitStatus(deviceId, userEmail = null, userPhone = null) {
 
             // Only update date/count, preserve premium info
             await userRef.set({ date: today, count: DAILY_LIMIT }, { merge: true });
+        } else if (userData.count > DAILY_LIMIT) {
+            // AUTO-FIX: If count > 5 (due to old bug behavior), reset to 5.
+            console.log(`[Limit] Auto-correcting count for ${deviceId} from ${userData.count} to ${DAILY_LIMIT}`);
+            userData.count = DAILY_LIMIT;
+            await userRef.update({ count: DAILY_LIMIT });
         }
 
         // Check Premium via Expiry Date
