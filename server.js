@@ -39,7 +39,8 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // 1. Check Limit Endpoint
 app.get('/api/limit/:deviceId', async (req, res) => {
     const { deviceId } = req.params;
-    const status = await limitService.getLimitStatus(deviceId);
+    const { email } = req.query; // Get email from query params
+    const status = await limitService.getLimitStatus(deviceId, email);
     res.json(status);
 });
 
@@ -94,7 +95,7 @@ app.post('/api/verify-payment', async (req, res) => {
 app.post('/api/generate', upload.single('image'), async (req, res) => {
     // Determine source of body (multipart vs json)
     // If multipart, req.body fields are flattened. inputs is likely a stringified JSON.
-    let { deviceId, category, inputs, adRewardToken } = req.body;
+    let { deviceId, category, inputs, adRewardToken, email } = req.body;
 
     // Parse inputs if it comes as a string (from Multipart)
     if (typeof inputs === 'string') {
@@ -110,7 +111,7 @@ app.post('/api/generate', upload.single('image'), async (req, res) => {
     }
 
     // Check Limit (Bypass if adRewardToken is present)
-    const limitStatus = await limitService.getLimitStatus(deviceId);
+    const limitStatus = await limitService.getLimitStatus(deviceId, email);
 
     // If adRewardToken is true, we assume the user watched an ad.
     // Ideally we should verify a real token, but for now we trust the client flag.

@@ -39,7 +39,7 @@ function getTodayStr() {
     return new Date().toISOString().split('T')[0];
 }
 
-async function getLimitStatus(deviceId) {
+async function getLimitStatus(deviceId, userEmail = null) {
     if (!deviceId) return { allowed: false, remaining: 0, error: "No Device ID" };
 
     try {
@@ -56,7 +56,7 @@ async function getLimitStatus(deviceId) {
                 count: DAILY_LIMIT,
                 ...userData // Keep existing fields like subscriptionExpiry
             };
-            if (userData.subscriptionExpiry) delete userData.count; // Optimization: Don't need count for premium, but kept for logic simplicity
+            if (userData.subscriptionExpiry) delete userData.count; // Optimization: Don't need count for premium
 
             // Only update date/count, preserve premium info
             await userRef.set({ date: today, count: DAILY_LIMIT }, { merge: true });
@@ -68,6 +68,18 @@ async function getLimitStatus(deviceId) {
             const now = new Date();
 
             if (expiryDate > now) {
+                // VERIFY OWNERSHIP: If premium has an email linked, requester MUST match
+                if (userData.email && userEmail) {
+                    if (userData.email.toLowerCase() !== userEmail.toLowerCase()) {
+                        console.log(`[Limit] Premium mismatch. Owner: ${userData.email}, Requester: ${userEmail}. Downgrading to Free.`);
+                        return {
+                            allowed: userData.count > 0,
+                            remaining: userData.count,
+                            isPremium: false // Not premium for THIS user
+                        };
+                    }
+                }
+
                 return {
                     allowed: true,
                     remaining: 9999,
