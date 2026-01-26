@@ -39,7 +39,7 @@ function getTodayStr() {
     return new Date().toISOString().split('T')[0];
 }
 
-async function getLimitStatus(deviceId, userEmail = null) {
+async function getLimitStatus(deviceId, userEmail = null, userPhone = null) {
     if (!deviceId) return { allowed: false, remaining: 0, error: "No Device ID" };
 
     try {
@@ -68,16 +68,42 @@ async function getLimitStatus(deviceId, userEmail = null) {
             const now = new Date();
 
             if (expiryDate > now) {
-                // VERIFY OWNERSHIP: If premium has an email linked, requester MUST match
-                if (userData.email && userEmail) {
-                    if (userData.email.toLowerCase() !== userEmail.toLowerCase()) {
-                        console.log(`[Limit] Premium mismatch. Owner: ${userData.email}, Requester: ${userEmail}. Downgrading to Free.`);
-                        return {
-                            allowed: userData.count > 0,
-                            remaining: userData.count,
-                            isPremium: false // Not premium for THIS user
-                        };
+                // VERIFY OWNERSHIP:
+                // If Premium is linked to Email or Phone, requester MUST match one of them.
+
+                let isMatch = false;
+                let hasOwnerInfo = false;
+
+                if (userData.email) {
+                    hasOwnerInfo = true;
+                    if (userEmail && userData.email.toLowerCase() === userEmail.toLowerCase()) {
+                        isMatch = true;
                     }
+                }
+
+                if (userData.phone) {
+                    hasOwnerInfo = true;
+                    // Phone formats can vary (+91..., 98...), simple includes check or strict check
+                    // Ideally sanitize both. For now assuming similar formats from Firebase
+                    if (userPhone && (userData.phone === userPhone || userPhone.includes(userData.phone) || userData.phone.includes(userPhone))) {
+                        isMatch = true;
+                    }
+                }
+
+                // If owner info exists but NO match found -> DENY
+                if (hasOwnerInfo && !isMatch) {
+                    console.log(`[Limit] Premium mismatch. Owner: ${userData.email}/${userData.phone}, Requester: ${userEmail}/${userPhone}.`);
+
+                    // Special Case: New device login for legitimate owner?
+                    // Current logic: We rely on deviceId. The issue is "Shared Device".
+                    // If User B (Free) uses Device 1 (Premium of User A), User B should be Free.
+                    // So DENY is correct.
+
+                    return {
+                        allowed: userData.count > 0,
+                        remaining: userData.count,
+                        isPremium: false
+                    };
                 }
 
                 return {
