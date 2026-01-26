@@ -68,6 +68,26 @@ async function getLimitStatus(deviceId, userEmail = null, userPhone = null) {
             const now = new Date();
 
             if (expiryDate > now) {
+                // BACKWARD COMPATIBILITY & SECURITY FIX:
+                // If Premium exists but has NO Owner Info (Legacy Purchase), LOCK IT to valid requester.
+                if (!userData.email && !userData.phone) {
+                    if (userEmail || userPhone) {
+                        try {
+                            console.log(`[Limit] Auto-Claiming Orphan Premium for Device ${deviceId} to ${userEmail || userPhone}`);
+                            await userRef.set({
+                                email: userEmail || null,
+                                phone: userPhone || null
+                            }, { merge: true });
+
+                            // Update local data for immediate verification
+                            userData.email = userEmail || null;
+                            userData.phone = userPhone || null;
+                        } catch (e) {
+                            console.error("Auto-Claim Error:", e);
+                        }
+                    }
+                }
+
                 // VERIFY OWNERSHIP:
                 // If Premium is linked to Email or Phone, requester MUST match one of them.
 
