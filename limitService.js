@@ -127,7 +127,7 @@ async function getLimitStatus(deviceId, userEmail = null, userPhone = null) {
     }
 }
 
-async function decrementLimit(deviceId) {
+async function decrementLimit(deviceId, userEmail = null, userPhone = null) {
     try {
         const userRef = db.collection('users').doc(deviceId);
         // Transaction to ensure atomic update
@@ -138,7 +138,26 @@ async function decrementLimit(deviceId) {
 
             // Validate again inside transaction
             if (data.subscriptionExpiry && new Date(data.subscriptionExpiry) > new Date()) {
-                return; // Premium, don't decrement
+                // PREMIUM DEVICE DETECTED.
+                // CHECK IF OWNER MATCHES.
+                let isMatch = false;
+                let hasOwnerInfo = false;
+
+                if (data.email) {
+                    hasOwnerInfo = true;
+                    if (userEmail && data.email.toLowerCase() === userEmail.toLowerCase()) isMatch = true;
+                }
+                if (data.phone) {
+                    hasOwnerInfo = true;
+                    if (userPhone && (data.phone === userPhone || userPhone.includes(data.phone) || data.phone.includes(userPhone))) isMatch = true;
+                }
+
+                if (hasOwnerInfo && !isMatch) {
+                    // Mismatch! Treat as Free User -> DECREMENT
+                    // Proceed to decrement logic below
+                } else {
+                    return; // Premium User (Match or No Owner Info) -> Don't decrement
+                }
             }
 
             if (data.count > 0) {

@@ -215,9 +215,9 @@ Intent Guidelines:
         const response = await result.response;
         let text = response.text();
 
-        // Increment usage count (only if not ad rewarded)
+        // Decrement usage count (only if not ad rewarded)
         if (!adRewardToken) {
-            await limitService.incrementLimit(deviceId);
+            await limitService.decrementLimit(deviceId, email, phone);
         }
 
         // Clean up: Delete temp file
@@ -269,7 +269,7 @@ Intent Guidelines:
 
         let output = { prompt: text };
 
-        const updatedStatus = await limitService.getLimitStatus(deviceId);
+        const updatedStatus = await limitService.getLimitStatus(deviceId, email, phone);
         res.json({
             success: true,
             ...output,
