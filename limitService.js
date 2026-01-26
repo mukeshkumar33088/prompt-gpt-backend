@@ -90,15 +90,9 @@ async function getLimitStatus(deviceId, userEmail = null, userPhone = null) {
                     }
                 }
 
-                // If owner info exists but NO match found -> DENY
+                // If owner info exists but NO match found (or requester sent nothing) -> DENY
                 if (hasOwnerInfo && !isMatch) {
                     console.log(`[Limit] Premium mismatch. Owner: ${userData.email}/${userData.phone}, Requester: ${userEmail}/${userPhone}.`);
-
-                    // Special Case: New device login for legitimate owner?
-                    // Current logic: We rely on deviceId. The issue is "Shared Device".
-                    // If User B (Free) uses Device 1 (Premium of User A), User B should be Free.
-                    // So DENY is correct.
-
                     return {
                         allowed: userData.count > 0,
                         remaining: userData.count,
