@@ -36,6 +36,11 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Routes
 
+// 0. Keep-Alive / Health Endpoint
+app.get('/', (req, res) => {
+    res.send("Server is Awake! 🟢");
+});
+
 // 1. Check Limit Endpoint
 app.get('/api/limit/:deviceId', async (req, res) => {
     const { deviceId } = req.params;
@@ -177,8 +182,7 @@ Intent Guidelines:
                 userPrompt = JSON.stringify(inputs);
         }
 
-        // Call Gemini
-        // Using "gemini-flash-latest" which typically points to the stable 1.5 Flash (better quotas)
+        // Call Gemini with Retry Logic
         const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
         const chat = model.startChat({
@@ -198,10 +202,8 @@ Intent Guidelines:
 
         // Add Image if present
         if (req.file) {
-            // Read file from disk (since we use diskStorage now)
             const imageBuffer = fs.readFileSync(req.file.path);
             const base64Image = imageBuffer.toString('base64');
-
             const imagePart = {
                 inlineData: {
                     data: base64Image,
@@ -211,9 +213,26 @@ Intent Guidelines:
             parts.push(imagePart);
         }
 
-        const result = await chat.sendMessage(parts);
-        const response = await result.response;
-        let text = response.text();
+        let text = "";
+        let retryCount = 0;
+        const maxRetries = 2;
+
+        while (retryCount <= maxRetries) {
+            try {
+                const result = await chat.sendMessage(parts);
+                const response = await result.response;
+                text = response.text();
+                break; // Success, exit loop
+            } catch (err) {
+                if ((err.status === 429 || err.status === 503) && retryCount < maxRetries) {
+                    console.log(`[Gemini] Rate Limit/Busy (Attempt ${retryCount + 1}). Retrying in 2s...`);
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    retryCount++;
+                } else {
+                    throw err; // Fatal error or max retries reached
+                }
+            }
+        }
 
         // Decrement usage count (only if not ad rewarded)
         if (!adRewardToken) {
