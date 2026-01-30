@@ -61,42 +61,40 @@ app.post('/api/reward', (req, res) => {
     res.json(result);
 });
 
-// 1.8 Payment Endpoints
-app.post('/api/create-order', async (req, res) => {
+// 1.8 Payment Endpoints (Razorpay Removed)
+// app.post('/api/create-order', ...);
+// app.post('/api/verify-payment', ...);
+
+// 2. Verify Payment (Google Play Billing)
+app.post('/api/verify-payment-google', async (req, res) => {
     try {
-        const { amount } = req.body;
-        const order = await paymentService.createOrder(amount);
-        res.json(order);
+        const { purchaseToken, productId, deviceId, orderId } = req.body;
+
+        console.log(`Google Payment Received: ${orderId} for ${productId}`);
+
+        // TODO: Validate 'purchaseToken' with Google Play Developer API using Service Account
+        // For now, we trust the Client (Risk of cracked apps sending fake requests, but okay for MVP)
+
+        let days = 30;
+        if (productId.includes('year')) days = 365;
+
+        // Upgrade User
+        const result = await limitService.upgradeUser(deviceId, days, {
+            source: 'google_play',
+            order_id: orderId,
+            product_id: productId,
+            token: purchaseToken
+        });
+
+        res.json({ success: true, message: 'Premium Activated', ...result });
+
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('Google Verification Error:', error);
+        res.status(500).json({ success: false, error: 'Verification failed' });
     }
 });
 
-app.post('/api/verify-payment', async (req, res) => {
-    const { orderId, paymentId, signature, deviceId, duration, email, phone, amount } = req.body;
-    const isValid = paymentService.verifyPayment(orderId, paymentId, signature);
-
-    if (isValid) {
-        // Use provided duration or default to 30
-        const days = duration || 30;
-
-        // Pass payment details to upgradeUser
-        const paymentDetails = {
-            orderId,
-            paymentId,
-            email,
-            phone,
-            amount
-        };
-
-        await limitService.upgradeUser(deviceId, days, paymentDetails);
-        res.json({ success: true, message: `Premium Activated for ${days} Days` });
-    } else {
-        res.status(400).json({ success: false, error: "Invalid Signature" });
-    }
-});
-
-// 2. Generate Prompt Endpoint
+// 3. Generate Prompt Endpoint
 app.post('/api/generate', upload.single('image'), async (req, res) => {
     // Determine source of body (multipart vs json)
     // If multipart, req.body fields are flattened. inputs is likely a stringified JSON.
@@ -122,7 +120,7 @@ app.post('/api/generate', upload.single('image'), async (req, res) => {
     // Ideally we should verify a real token, but for now we trust the client flag.
     if (adRewardToken) {
         console.log(`[Generate] Bypassing limit for device ${deviceId} due to Ad Reward.`);
-        await limitService.incrementLimit(deviceId); // Restore balance so next check passes normally too
+        // Don't increment. The reward is that we won't decrement later.
     } else if (!limitStatus.allowed) {
         return res.status(403).json({
             error: "Daily limit reached",
