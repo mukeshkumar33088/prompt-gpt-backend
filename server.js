@@ -61,15 +61,6 @@ app.post('/api/reward', (req, res) => {
     res.json(result);
 });
 
-// 1.6 Rate Us Reward Endpoint
-app.post('/api/rate-reward', async (req, res) => {
-    const { deviceId } = req.body;
-    if (!deviceId) return res.status(400).json({ error: "Missing Device ID" });
-
-    const result = await limitService.claimRatingReward(deviceId);
-    res.json(result);
-});
-
 // 1.8 Payment Endpoints (Razorpay Removed)
 // app.post('/api/create-order', ...);
 // app.post('/api/verify-payment', ...);
