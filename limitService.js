@@ -129,7 +129,8 @@ async function getLimitStatus(deviceId, userEmail = null, userPhone = null) {
                     allowed: true,
                     remaining: 9999,
                     isPremium: true,
-                    expiryDate: userData.subscriptionExpiry
+                    expiryDate: userData.subscriptionExpiry,
+                    hasRated: userData.hasRated || false
                 };
             }
         }
@@ -137,7 +138,8 @@ async function getLimitStatus(deviceId, userEmail = null, userPhone = null) {
         return {
             allowed: userData.count > 0,
             remaining: userData.count,
-            isPremium: false
+            isPremium: false,
+            hasRated: userData.hasRated || false
         };
     } catch (e) {
         console.error("Error getting limit status:", e);
@@ -249,9 +251,43 @@ async function upgradeUser(deviceId, days = 30, paymentDetails = {}) {
     }
 }
 
+async function claimRatingReward(deviceId) {
+    try {
+        const userRef = db.collection('users').doc(deviceId);
+        const doc = await userRef.get();
+
+        let hasRated = false;
+        let currentCount = 0;
+
+        if (doc.exists) {
+            const data = doc.data();
+            hasRated = data.hasRated || false;
+            currentCount = data.count || 0;
+        }
+
+        if (hasRated) {
+            return { success: false, message: "Already claimed" };
+        }
+
+        // Grant Reward (5 Prompts)
+        await userRef.set({
+            hasRated: true,
+            count: currentCount + 5
+        }, { merge: true });
+
+        console.log(`[Reward] Device ${deviceId} rated and claimed 5 prompts.`);
+        return { success: true, message: "Reward claimed", added: 5 };
+
+    } catch (e) {
+        console.error("Error claiming rating reward:", e);
+        return { success: false, message: "Server error" };
+    }
+}
+
 module.exports = {
     getLimitStatus,
     decrementLimit,
     incrementLimit,
-    upgradeUser
+    upgradeUser,
+    claimRatingReward
 };
