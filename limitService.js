@@ -129,7 +129,8 @@ async function getLimitStatus(deviceId, userEmail = null, userPhone = null) {
                     allowed: true,
                     remaining: 9999,
                     isPremium: true,
-                    expiryDate: userData.subscriptionExpiry
+                    expiryDate: userData.subscriptionExpiry,
+                    hasRated: userData.hasRated || false
                 };
             }
         }
@@ -137,7 +138,8 @@ async function getLimitStatus(deviceId, userEmail = null, userPhone = null) {
         return {
             allowed: userData.count > 0,
             remaining: userData.count,
-            isPremium: false
+            isPremium: false,
+            hasRated: userData.hasRated || false
         };
     } catch (e) {
         console.error("Error getting limit status:", e);
@@ -201,6 +203,38 @@ async function incrementLimit(deviceId) {
     }
 }
 
+async function claimRateReward(deviceId) {
+    try {
+        const userRef = db.collection('users').doc(deviceId);
+        let newCount = 0;
+        
+        await db.runTransaction(async (t) => {
+            const doc = await t.get(userRef);
+            if (!doc.exists) {
+                throw new Error("User not found");
+            }
+            const data = doc.data();
+            
+            if (data.hasRated) {
+                throw new Error("Already rated");
+            }
+            
+            const currentCount = data.count || 0;
+            newCount = currentCount + 5;
+            
+            t.update(userRef, { 
+                hasRated: true,
+                count: newCount
+            });
+        });
+        
+        return { success: true, remaining: newCount };
+    } catch (e) {
+        console.error("Error claiming rate reward:", e);
+        return { success: false, error: e.message };
+    }
+}
+
 async function upgradeUser(deviceId, days = 30, paymentDetails = {}) {
     try {
         const userRef = db.collection('users').doc(deviceId);
@@ -253,5 +287,6 @@ module.exports = {
     getLimitStatus,
     decrementLimit,
     incrementLimit,
+    claimRateReward,
     upgradeUser
 };
